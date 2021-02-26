@@ -87,7 +87,7 @@ class Bitboard():
         pass
     
     def __getitem__(self, coords):
-        index = coordsToIndex(coords)
+        index = Bitboard.coordsToIndex(coords)
         return (self.bits << index) & 0b1
         
         
@@ -105,17 +105,17 @@ class Bitboard():
             
     def getSlidingMoves(self, bitboardAll, bitboardOwn, pieceNum):
         
-        mask = getCaptureMask(self.getPiece())
+        mask = cm.getCaptureMask(self.getPiece())
         
         masked = mask & bitboardAll.getBits()
 
         right = getRight(masked, pieceNum)
-        left  = Left(masked, pieceNum)
+        left  = getLeft(masked, pieceNum)
         rightRev = revBits64(right)
         
-        rightRev = calcMoves(right)
+        calcRightRev = calcMoves(rightRev)
         calcLeft = calcMoves(left)
-        calcRight = revBits64(right)
+        calcRight = revBits64(calcRightRev)
         
         combined = (calcRight << pieceNum + 1) | calcLeft
         final = combined & ~bitboardOwn.getBits()
