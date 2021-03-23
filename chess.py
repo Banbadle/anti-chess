@@ -135,6 +135,9 @@ class Gamestate():
         self.enPassant  = {WHITE: Bitboard(WHITE), BLACK: Bitboard(BLACK)}
         self.turn = WHITE
         
+        self.moves = dict()
+        self.captures = dict()
+        
         self.pieceBitboards[BOTH | ALL] = Bitboard(BOTH | ALL)
         
         for pieceType in pieceArray + [ALL]:
@@ -172,6 +175,15 @@ class Gamestate():
             for pieceType in pieceArray + [ALL]:
                 self.getBoard(pieceType | colour).default()
                 
+    # Return all moves where a piece can be captured
+    def getCaptures(self, piece, pos):
+        oppColour = invColour(getColour(piece))
+        
+        if getPieceType(piece) == PAWN:
+            return cm.getCaptureMask(piece, pos) & self.getAll(oppColour).getBits()
+        else:
+            return self.getMoves(piece,pos) & self.getAll(oppColour).getBits()
+    
     # returns a binary number corresponding to legal moves for piece at position Pos
     # (Returns an integer number, not a Bitboard)
     def getMoves(self, piece, pos):
@@ -183,22 +195,47 @@ class Gamestate():
             # print(Bitboard(bits=self.getSlidingMoves(piece,pos)))
             return self.getSlidingMoves(piece, pos) & ~self.getAll(colour).getBits()
 
-        elif pieceType == PAWN:
-            # print("MOVEMENT")
-            # print(Bitboard(bits=cm.getMoveMask(piece,pos)))
-            # print("ALL")
-            # print(self.getAll())
-            capMask = cm.getCaptureMask(piece, pos) & self.getAll(invColour(colour)).getBits()
-            moveMask = cm.getMoveMask(piece, pos) & ~self.getAll().getBits()
-            return capMask + moveMask
-
         elif pieceType in staticPieces:
             # print(Bitboard(bits=cm.getCaptureMask(piece, pos)))
             return cm.getCaptureMask(piece, pos) & ~self.getAll(colour).getBits()
+        
+        elif pieceType == PAWN:
+            pawnMask = cm.getMoveMask(piece, pos) & ~self.getAll().getBits()
+            
+            if pawnMask != 0 and cm.canDoubleStepPawn(colour, pos):
+                return cm.getDoubleStepPawnMask(colour, pos) & ~self.getAll().getBits()
+            
+            return pawnMask
+        
+        else:
+            raise Exception("Piece {} is not a valid selection for getMoves".format(piece))
 
     
     # Gets moves for sliding pieces (Queen, Rook, Bishop)
     def getSlidingMoves(self, piece, coords):
+        
+        # Gets the digits of a binary number after digit "pieceNum"
+        def getLeft(bits, pieceNum):
+            return bits >> pieceNum + 1
+        
+        # Gets the digits of a binary number up to digit "pieceNum"
+        def getRight(bits, pieceNum):
+            ones = ((0b1 << pieceNum) - 0b1)
+            return bits & ones
+        
+        # Reverses the bits of a 64 digit binary number
+        # Example: revBits64(0b1101) = 0b0000...001011
+        def revBits64(bits):
+            revStr = bin(bits)[:1:-1]
+            length = len(revStr)
+            
+            rev = int(revStr, 2) << (64 - length)
+                
+            return rev
+        
+        # 
+        def getSlideFromMask(bits, mask):
+            return ((bits-1) ^ (bits)) & mask
         
         pieceNum = coordsToIndex(coords)
         colour = piece & 0b11
@@ -237,9 +274,6 @@ class Gamestate():
         
         pawnBoard[pos]      = 0
         promoteBoard[pos]   = 1
-        
-    def capture(self, movingPiece, capturePiece, fromPos, toPos):
-        pass
         
     #Moves piece from fromPos to toPos, and updates the ALL boards.
     def movePiece(self, piece, fromPos, toPos, capture=True, returnString=False):
@@ -325,28 +359,6 @@ class Gamestate():
     def __str__(self):
         pass
 
-# Gets the digits of a binary number after digit "pieceNum"
-def getLeft(bits, pieceNum):
-    return bits >> pieceNum + 1
-
-# Gets the digits of a binary number up to digit "pieceNum"
-def getRight(bits, pieceNum):
-    ones = ((0b1 << pieceNum) - 0b1)
-    return bits & ones
-
-# Reverses the bits of a 64 digit binary number
-# Example: revBits64(0b1101) = 0b0000...001011
-def revBits64(bits):
-    revStr = bin(bits)[:1:-1]
-    length = len(revStr)
-    
-    rev = int(revStr, 2) << (64 - length)
-        
-    return rev
- 
-def getSlideFromMask(bits, mask):
-    return ((bits-1) ^ (bits)) & mask
-
 def invColour(colour):
     return ~colour & 0b11
 
@@ -381,11 +393,11 @@ def indexToCoords(index):
 
     return (col, row)
 
-test = Bitboard(WHITE + PAWN)
-test.default()
+# test = Bitboard(WHITE + PAWN)
+# test.default()
 
-test[0,2] = 1
-print(test)
+# test[0,2] = 1
+# print(test)
 
 
 # test = Bitboard()

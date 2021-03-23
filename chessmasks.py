@@ -34,9 +34,8 @@ rookLines       = dict()
 bishopLines     = dict()
 queenLines      = dict()
 
-pawnMoveWhite   = dict()
-pawnMoveBlack   = dict()
-
+pawnMoveWhite       = dict()
+pawnMoveBlack       = dict()
 
 for i in range(0,8):
     
@@ -134,3 +133,23 @@ def getMoveMask(piece,pos):
         return pawnMoveDict[colour][pos]
     else:
         return getCaptureMask(piece,pos)
+    
+    
+    
+pawnDoubleMoveWhite = dict()
+pawnDoubleMoveBlack = dict()   
+
+dpBase = 0b10000000_10000000
+for i in range(0,8):
+    pawnDoubleMoveBlack[i,1] = (dpBase << 8*2)  >> i
+    pawnDoubleMoveWhite[i,6] = (dpBase << 8*4)  >> i 
+    
+doublePawn = {BLACK: pawnDoubleMoveBlack, WHITE: pawnDoubleMoveWhite}
+
+def getDoubleStepPawnMask(colour, pos):
+    return doublePawn[colour][pos]
+
+doublePawnRow = {BLACK: 1, WHITE: 6}
+
+def canDoubleStepPawn(colour, pos):
+    return doublePawnRow[colour] == pos[1]
