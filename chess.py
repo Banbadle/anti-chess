@@ -1,5 +1,7 @@
 import chessmasks as cm
- 
+import datetime as dt
+
+
 NONE    = 0b0
 PAWN    = 0b1   << 2
 QUEEN   = 0b10  << 2
@@ -11,39 +13,56 @@ ALL     = 0b111 << 2
 
 WHITE = 0b01
 BLACK = 0b10
+BOTH  = 0b11
 
-pieceArray = [PAWN, QUEEN, KING, ROOK, BISHOP, KNIGHT]
-colourArray = [WHITE, BLACK]
+
+pieceArray      = [PAWN, QUEEN, KING, ROOK, BISHOP, KNIGHT]
+colourArray     = [WHITE, BLACK]
+
+pieceSet        = set(pieceArray)
+colourSet       = set(colourArray)
+
+slidingPieces   = set([QUEEN, BISHOP, ROOK])
+staticPieces    = set([KNIGHT, KING])
+
+promotePieces   = [QUEEN, ROOK, KNIGHT, BISHOP, KING]
 
 letterMap = {"a":0, "b":1, "c":2, "d":3, "e":4, "f":5, "g":6, "h":7}
+letterMapInv = {val: key for key, val in letterMap.items()}
 numSet = set(["1", "2", "3", "4", "5", "6", "7", "8"])
+
+pieceToLetter = {PAWN: "", QUEEN: "Q", ROOK: "R", KING: "K", KNIGHT: "N", BISHOP: "B"}
 
 class Bitboard():
     
     # Starting bitboards for each piece type DEFAULT
     DEFAULT = dict()
     
-    DEFAULT[WHITE | NONE]       = 0b0
+    DEFAULT[NONE]               = 0b0
+    
     DEFAULT[BLACK | NONE]       = 0b0
-    DEFAULT[BLACK | ALL]        = 0b0
-    DEFAULT[WHITE | ALL]        = 0b0
+    DEFAULT[WHITE | NONE]       = 0b0
+    DEFAULT[BLACK | ALL]        = 0b11111111_11111111
+    DEFAULT[WHITE | ALL]        = 0b11111111_11111111 << 8*6
     
-    DEFAULT[WHITE | PAWN]       = 0b11111111 << 8
-    DEFAULT[WHITE | ROOK]       = 0b10000001
-    DEFAULT[WHITE | KNIGHT]     = 0b01000010
-    DEFAULT[WHITE | BISHOP]     = 0b00100100
-    DEFAULT[WHITE | QUEEN]      = 0b00010000
-    DEFAULT[WHITE | KING]       = 0b00001000
+    DEFAULT[BOTH | ALL]         = DEFAULT[WHITE | ALL] + DEFAULT[BLACK | ALL] 
     
-    DEFAULT[BLACK | PAWN]       = 0b11111111 << 8*6
-    DEFAULT[BLACK | ROOK]       = 0b10000001 << 8*7
-    DEFAULT[BLACK | KNIGHT]     = 0b01000010 << 8*7
-    DEFAULT[BLACK | BISHOP]     = 0b00100100 << 8*7
+    DEFAULT[BLACK | PAWN]       = 0b11111111 << 8
+    DEFAULT[BLACK | ROOK]       = 0b10000001
+    DEFAULT[BLACK | KNIGHT]     = 0b01000010
+    DEFAULT[BLACK | BISHOP]     = 0b00100100
+    DEFAULT[BLACK | QUEEN]      = 0b00010000
+    DEFAULT[BLACK | KING]       = 0b00001000
+    
+    DEFAULT[WHITE | PAWN]       = 0b11111111 << 8*6
+    DEFAULT[WHITE | ROOK]       = 0b10000001 << 8*7
+    DEFAULT[WHITE | KNIGHT]     = 0b01000010 << 8*7
+    DEFAULT[WHITE | BISHOP]     = 0b00100100 << 8*7
     DEFAULT[WHITE | QUEEN]      = 0b00010000 << 8*7
     DEFAULT[WHITE | KING]       = 0b00001000 << 8*7
 
 
-    def __init__(self, piece=NONE, bits=0):
+    def __init__(self, piece=NONE, bits=0b0):
         self.bits = bits
         self.piece = piece
         
@@ -76,23 +95,14 @@ class Bitboard():
                 return (self.bits >> (row*8 + col)) & 0b1
             
         raise Exception("Index must be a valid square on a chess board")
-        
-    def coordsToIndex(self, coords):
-        if len(coords) == 2:
-            row, column = coords
-            return row*8 + column
-        raise Exception("2 co-ordinates required, {} given.".format(len(coords)))
-        
-    def indexToCoords(self, index):
-        pass
     
     def __getitem__(self, coords):
-        index = Bitboard.coordsToIndex(coords)
-        return (self.bits << index) & 0b1
+        index = coordsToIndex(coords)
+        return (self.bits >> index) & 0b1
         
         
     def __setitem__(self, coords, value):
-        index = self.coordsToIndex(coords)
+        index = coordsToIndex(coords)
         bit = 0b1 << index
         
         if value == 1:
@@ -102,48 +112,219 @@ class Bitboard():
 
         else:
             raise Exception("value must be 1 or 0, value was {}".format(value))
-            
-    def getSlidingMoves(self, bitboardAll, bitboardOwn, pieceNum):
-        
-        mask = cm.getCaptureMask(self.getPiece())
-        
-        masked = mask & bitboardAll.getBits()
-
-        right = getRight(masked, pieceNum)
-        left  = getLeft(masked, pieceNum)
-        rightRev = revBits64(right)
-        
-        calcRightRev = calcMoves(rightRev)
-        calcLeft = calcMoves(left)
-        calcRight = revBits64(calcRightRev)
-        
-        combined = (calcRight << pieceNum + 1) | calcLeft
-        final = combined & ~bitboardOwn.getBits()
-        
-        return final
 
     def __str__(self):
         tempText = ""
         for i in range(0,8):
-            tempText = tempText + "{:08b}\n".format((self.bits >> 8*(7-i)) & 0b11111111)
+            tempText = tempText + "{:08b}".format((self.bits >> 8*i) & 0b11111111)
+            
+            # if i != 7:
+            tempText = tempText + "\n"
 
         return tempText
+    
+    def slideFromLeft(self, bitboardAll, bitboardOwn, coords, captureMask, reverse=False):
+        pass
+        
     
 class Gamestate():
     
     def __init__(self):
-        self.white = dict()
-        self.black = dict()
-        for piece in pieceArray:
-            self.white[piece | WHITE] = Bitboard(piece | WHITE)
-            self.black[piece | BLACK] = Bitboard(piece | BLACK)
-
         
+        self.pieceBitboards  = dict()
+        self.enPassant  = {WHITE: Bitboard(WHITE), BLACK: Bitboard(BLACK)}
+        self.turn = WHITE
+        
+        self.pieceBitboards[BOTH | ALL] = Bitboard(BOTH | ALL)
+        
+        for pieceType in pieceArray + [ALL]:
+            for colour in colourArray:
+                self.pieceBitboards[pieceType | colour] = Bitboard(pieceType | colour)
+                
+    # Gets bitboard of the specified piece        
+    def getBoard(self, piece):
+        return self.pieceBitboards[piece]
     
-    def newGame(self):
-        self.white[PAWN] = Bitboard()
-        self.black[PAWN] = Bitboard()
+    # Incase of disparity between piece boards and an "ALL" board
+    def updateAlls(self):
+        for colour in colourArray:
+            bits = 0b0
+            for pieceType in pieceArray:
+                bits |= self.getBoard(colour | pieceType)
+                
+            self.getBoard(colour + ALL).setBits(bits)
+                
+    
+    # Returns the bitboard containing all pieces of specified colour
+    def getAll(self, colour=BOTH):
+        return self.pieceBitboards[colour | ALL]
+    
+    # Sets all values to the appropriate value of a new game
+    def default(self):
         
+        self.turn = WHITE
+        
+        self.getBoard(BOTH + ALL).default()
+        
+        for colour in colourArray:
+            self.enPassant[colour].default()
+            
+            for pieceType in pieceArray + [ALL]:
+                self.getBoard(pieceType | colour).default()
+                
+    # returns a binary number corresponding to legal moves for piece at position Pos
+    # (Returns an integer number, not a Bitboard)
+    def getMoves(self, piece, pos):
+        
+        pieceType   = getPieceType(piece)
+        colour      = getColour(piece)
+
+        if pieceType in slidingPieces:
+            # print(Bitboard(bits=self.getSlidingMoves(piece,pos)))
+            return self.getSlidingMoves(piece, pos) & ~self.getAll(colour).getBits()
+
+        elif pieceType == PAWN:
+            # print("MOVEMENT")
+            # print(Bitboard(bits=cm.getMoveMask(piece,pos)))
+            # print("ALL")
+            # print(self.getAll())
+            capMask = cm.getCaptureMask(piece, pos) & self.getAll(invColour(colour)).getBits()
+            moveMask = cm.getMoveMask(piece, pos) & ~self.getAll().getBits()
+            return capMask + moveMask
+
+        elif pieceType in staticPieces:
+            # print(Bitboard(bits=cm.getCaptureMask(piece, pos)))
+            return cm.getCaptureMask(piece, pos) & ~self.getAll(colour).getBits()
+
+    
+    # Gets moves for sliding pieces (Queen, Rook, Bishop)
+    def getSlidingMoves(self, piece, coords):
+        
+        pieceNum = coordsToIndex(coords)
+        colour = piece & 0b11
+        bitboardOwn = self.getAll(colour)
+        bitboardAll = self.getAll()
+        # This algorithm needs cleaning up and explaining.
+        # May be more efficient to run along each slide manually
+        
+        final = 0b0
+        #captureMask     = cm.getCaptureMask(piece, coords)
+        for captureMask in cm.getCaptureLines(piece,coords):
+            maskedPieces    = captureMask & bitboardAll.getBits()
+            
+            captureMaskRight    = getRight(captureMask, pieceNum)
+            captureMaskRightRev = revBits64(captureMaskRight)
+            
+            right               = getRight(maskedPieces, pieceNum)
+            rightRev            = revBits64(right)
+            calcRightRev        = getSlideFromMask(rightRev, captureMaskRightRev)
+            calcRight           = revBits64(calcRightRev)
+            
+            captureMaskLeft     = getLeft(captureMask, pieceNum)
+            
+            left                = getLeft(maskedPieces, pieceNum)
+            calcLeft            = getSlideFromMask(left, captureMaskLeft)
+            
+            combined    = calcRight | (calcLeft << (pieceNum + 1) )
+            final       |= combined & ~bitboardOwn.getBits()
+        
+        return final
+    
+    # Promotes a pawn in position pos to a piece of type pieceType
+    def promotePiece(self, colour, pieceType, pos):
+        pawnBoard       = self.getBoard(colour + PAWN)
+        promoteBoard    = self.getBoard(colour + pieceType)
+        
+        pawnBoard[pos]      = 0
+        promoteBoard[pos]   = 1
+        
+    def capture(self, movingPiece, capturePiece, fromPos, toPos):
+        pass
+        
+    #Moves piece from fromPos to toPos, and updates the ALL boards.
+    def movePiece(self, piece, fromPos, toPos, capture=True, returnString=False):
+        
+        colour = getColour(piece)
+        
+        pieceBoard = self.getBoard(piece)
+        
+        if pieceBoard[fromPos] == 0:
+            raise Exception("There is no piece of type {} at position {}".format(bin(piece), fromPos))
+            
+        if self.getAll(colour) == 1:
+            raise Exception("There is already a piece of colour {} at position {}".format(bin(colour), toPos))
+            
+        if capture == True:
+            
+            oppColour = invColour(colour)
+            # This could be handled more efficiently by specifying the capture board. Will rethink later
+            for oppPieceType in pieceArray:
+                oppBoard = self.getBoard(oppPieceType | oppColour)
+                if oppBoard[toPos] == 1:
+                    self[oppPieceType + oppColour, toPos[0], toPos[1]] = 0
+                    
+        self[piece, fromPos[0], fromPos[1]] = 0
+        self[piece, toPos[0], toPos[1]]   = 1
+                    
+        if returnString == True:
+            return pieceToLetter[piece] + coordsToAlg(fromPos) + "x" * int(capture) + coordsToAlg(toPos)
+        
+    #returns the piece in position pos
+    def getPiece(self, pos):
+        i,j = pos
+        for pieceType in pieceArray:
+            for colour in colourArray:
+
+                if self.getBoard(pieceType + colour)[i,j] == 1:
+                    return pieceType + colour
+
+        return NONE
+
+    # Returns True if a move is legal, False otherwise
+    def isLegalMove(self, piece, fromPos, toPos):
+        pieceBoard = self.getBoard(piece)
+        if pieceBoard[fromPos] == 1:
+
+            
+            moveBits = self.getMoves(piece, fromPos)
+            index = coordsToIndex(toPos)
+            if (moveBits >> index) & 0b1 == 1:
+                return True
+
+        return False
+
+    # args: piece, xPos, yPos
+    # sets the value at (xPos, yPos) on piece's Bitboard to val
+    def __setitem__(self, args, val):
+        if len(args) != 3:
+            raise Exception("3 arguments should be given; Piece, xPos, and yPos. {} were given".format(len(args)))
+        if val != 1 and val != 0:
+            raise Exception("Value must be 0 or 1, {} was given".format(val))
+            
+        piece, *pos = args
+        colour = getColour(piece)
+        
+        board       = self.getBoard(piece)
+        boardColAll = self.getAll(colour)
+        boardAll    = self.getAll()
+        
+        board[pos]          = val
+        boardColAll[pos]    = val
+        boardAll[pos]       = val
+    
+    # args: piece, xPos, yPos
+    def __getitem__(self, args):
+        if len(args) != 3:
+            raise Exception("3 arguments should be given; Piece, xPos, and yPos. {} were given".format(len(args)))
+            
+        piece, *pos = args    
+        board = self.getBoard(piece)
+        
+        return board[pos]
+    
+    def __str__(self):
+        pass
+
 # Gets the digits of a binary number after digit "pieceNum"
 def getLeft(bits, pieceNum):
     return bits >> pieceNum + 1
@@ -154,36 +335,82 @@ def getRight(bits, pieceNum):
     return bits & ones
 
 # Reverses the bits of a 64 digit binary number
+# Example: revBits64(0b1101) = 0b0000...001011
 def revBits64(bits):
-    rev = 0b0
-    for i in range(0,64):
-        rev |= (~(bits >> i) & 0b1 ) << i
+    revStr = bin(bits)[:1:-1]
+    length = len(revStr)
+    
+    rev = int(revStr, 2) << (64 - length)
         
     return rev
-    
-def calcMoves(bits, mask):
+ 
+def getSlideFromMask(bits, mask):
     return ((bits-1) ^ (bits)) & mask
-    
-class Gameboard():
-    
-    def __init__(self):
-        for piece in pieceArray:
-            for colour in colourArray:
-                pass
-    
 
-test = Bitboard(WHITE | PAWN)
+def invColour(colour):
+    return ~colour & 0b11
+
+def getColour(piece):
+    return piece & 0b11
+
+def getPieceType(piece):
+    return piece & ~0b11
+
+def onesBetween(ind1, ind2):
+    ones = ((0b1 << (ind2 - ind1 + 1)) - 1) << ind1
+    return bin(ones)
+
+
+# Co-ordinate stuff
+def coordsToIndex(coords):
+    if len(coords) == 2:
+        col, row = coords
+        return 8*row + (7-col)
+    raise Exception("2 co-ordinates required, {} given.".format(len(coords)))
+    
+def coordsToAlg(coords):
+    if len(coords) == 2:
+        col, row = coords
+        return letterMapInv[row] + str(col+1)
+
+    raise Exception("2 co-ordinates required, {} given".format(len(coords)))
+
+def indexToCoords(index):
+    row = index // 8
+    col = 7 - (index % 8)
+
+    return (col, row)
+
+test = Bitboard(WHITE + PAWN)
 test.default()
 
-test[0,4] = 1
+test[0,2] = 1
 print(test)
 
 
-test = Bitboard()
-test.setBits(cm.antiDiagMask[1])
-print(test)
+# test = Bitboard()
+# test.setBits(cm.antiDiagMask[1])
+# print(test)
 
 
-bits = cm.getCaptureMask(KING | WHITE, 3, 4)
-test.setBits(bits)
-print(test)
+# bits = cm.getCaptureMask(BISHOP + WHITE, (3, 4))
+# test.setBits(bits)
+# print(test)
+# print(test[1,1])
+
+# game = Gamestate()
+# game.default()
+
+# game.getBoard(WHITE | BISHOP)
+# print(game.getBoard(WHITE + BISHOP))
+# # game.movePiece(WHITE | BISHOP, (2,0), (4,4))
+# print(game.getBoard(WHITE + ROOK))
+# tet = game.getSlidingMoves(WHITE + ROOK, (2,2))
+
+# test.setBits(tet)
+# print((test))
+
+
+# print(coordsToAlg((3,7)))
+# print(test)
+

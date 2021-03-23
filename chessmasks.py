@@ -30,6 +30,13 @@ rookMask        = dict()
 bishopMask      = dict()
 knightMask      = dict()
 
+rookLines       = dict()
+bishopLines     = dict()
+queenLines      = dict()
+
+pawnMoveWhite   = dict()
+pawnMoveBlack   = dict()
+
 
 for i in range(0,8):
     
@@ -45,18 +52,21 @@ for i in range(0,8):
     
 
 
-for x in range(0,7):
-    for y in range(0,7):
+for x in range(0,8):
+    for y in range(0,8):
         #Variables for referencing diagonals
         diag        = y - x
         antiDiag    = x - (7-y)
         
         #ROOK
         rookMask[x,y]   = vertMask[x] | horizMask[y]
+        rookLines[x,y]  = [vertMask[x], horizMask[y]]
         #BISHOP
         bishopMask[x,y] = diagMask[diag] | antiDiagMask[antiDiag]
+        bishopLines[x,y]= [diagMask[diag], antiDiagMask[antiDiag]]
         #QUEEN
         queenMask[x,y]  = bishopMask[x,y] | rookMask[x,y]
+        queenLines[x,y] = [*rookLines[x,y], *bishopLines[x,y]]
         
         #KING
         baseKing        = 0b1_11000000
@@ -68,8 +78,13 @@ for x in range(0,7):
         basePawn        = 0b1_01000000
         pawnMaskTemp    = ((basePawn >> x) & 0b11111111)  << y*8
         
-        pawnMaskWhite[x,y]  = (pawnMaskTemp << 8) & ((0b1 << 64) - 1)
-        pawnMaskBlack[x,y]  = (pawnMaskTemp >> 8) & ((0b1 << 64) - 1)
+        pawnMaskWhite[x,y]  = (pawnMaskTemp >> 8) & ((0b1 << 64) - 1)
+        pawnMaskBlack[x,y]  = (pawnMaskTemp << 8) & ((0b1 << 64) - 1)
+        
+        basePawnMove        = 0b10000000
+        pawnMoveMask        = (basePawnMove >> x) << y*8
+        pawnMoveWhite[x,y]  = (pawnMoveMask >> 8) & ((0b1 << 64) - 1)
+        pawnMoveBlack[x,y]  = (pawnMoveMask << 8) & ((0b1 << 64) - 1)
         
         #KNIGHT
         baseKnight1     = 0b10_00100000
@@ -85,20 +100,37 @@ maskDict = dict()
 maskDict[WHITE | PAWN]  = pawnMaskWhite
 maskDict[BLACK | PAWN]  = pawnMaskBlack
 
-for colour in [0b0, 0b1, 0b10]:
+for colour in colourArray:
     maskDict[colour | ROOK]     = rookMask
     maskDict[colour | BISHOP]   = bishopMask
     maskDict[colour | QUEEN]    = queenMask
     maskDict[colour | KING]     = kingMask
     maskDict[colour | KNIGHT]   = knightMask
-    
 
+lineDict            = dict()   
+for colour in colourArray: 
+    lineDict[BISHOP + colour]    = bishopLines
+    lineDict[ROOK + colour]      = rookLines
+    lineDict[QUEEN + colour]     = queenLines
+
+pawnMoveDict = dict()
+pawnMoveDict[WHITE] = pawnMoveWhite
+pawnMoveDict[BLACK] = pawnMoveBlack
 
 def shiftLineToPos(line, x, y):
     return ((line >> x) & 0b11111111) << y*8       
         
-def getCaptureMask(piece, *pos):
+def getCaptureMask(piece, pos):
     pieceDict = maskDict[piece]
     return pieceDict[pos]
+
+def getCaptureLines(piece, pos):
+    return lineDict[piece][pos]
   
-  
+def getMoveMask(piece,pos):
+    pieceType = piece & ~0b11
+    colour = piece & 0b11
+    if pieceType == PAWN:
+        return pawnMoveDict[colour][pos]
+    else:
+        return getCaptureMask(piece,pos)
