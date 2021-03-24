@@ -31,7 +31,58 @@ letterMap = {"a":0, "b":1, "c":2, "d":3, "e":4, "f":5, "g":6, "h":7}
 letterMapInv = {val: key for key, val in letterMap.items()}
 numSet = set(["1", "2", "3", "4", "5", "6", "7", "8"])
 
-pieceToLetter = {PAWN: "", QUEEN: "Q", ROOK: "R", KING: "K", KNIGHT: "N", BISHOP: "B"}
+
+
+class Piece():
+    
+    def __init__(self, piece):
+        self.piece      = piece
+        self.pieceType  = piece & ~0b11
+        self.colour     = piece & 0b11 
+        
+    def getType(self):
+        return self.pieceType
+    
+    def getColour(self):
+        return self.colour
+    
+    def equals(self, val):
+        return self.piece == val
+
+class Move():
+        
+    def __init__(self, piece, fromPos, toPos, capBool=False, capPiece=NONE):
+        self.piece      = piece
+        self.fromPos    = fromPos
+        self.toPos      = toPos
+        self.capBool    = capBool
+        self.capPiece   = capPiece
+        
+    def getPiece(self):
+        return self.piece
+    
+    def getFromPos(self):
+        return self.fromPos
+    
+    def getToPos(self):
+        return self.toPos
+    
+    def getCapPiece(self):
+        return self.capPiece
+    
+    def getCapBool(self):
+        return self.capBool
+
+    def unpack(self):
+        return [self.getPiece(), self.getFromPos(), self.getToPos()]
+    
+    def __str__(self):
+        pieceType = getPieceType(self.getPiece())
+        capBool = int(self.getCapBool())
+        return pieceToLetter(self.getPiece()) +\
+            coordsToAlg(self.getFromPos()) +\
+            ("x" + pieceToLetter(self.getCapPiece())) * capBool +\
+                coordsToAlg(self.getToPos())
 
 class Bitboard():
     
@@ -148,6 +199,12 @@ class Gamestate():
     def getBoard(self, piece):
         return self.pieceBitboards[piece]
     
+    def getTurnPlayer(self):
+        return self.turn
+    
+    def changeTurnPlayer(self):
+        self.turn = invColour(self.turn)
+    
     # Incase of disparity between piece boards and an "ALL" board
     def updateAlls(self):
         for colour in colourArray:
@@ -211,6 +268,77 @@ class Gamestate():
             raise Exception("Piece {} is not a valid selection for getMoves".format(piece))
 
     
+    # Returns True if colour can capture a piece
+    # (Definitely inefficient)
+    def canCapture(self, colour):
+        
+        for pieceType in pieceArray:
+            board = self.getBoard(pieceType + colour)
+            
+            for i in range(0,8):
+                for j in range(0,8):
+                    
+                    checkBit = board[i,j]
+                    
+                    if checkBit == 1 and self.getCaptures(pieceType + colour, (i,j)) != 0:
+                        
+                        print(Bitboard(bits=self.getCaptures(pieceType+colour, (i,j))))
+                        print("{} AT {} CAN CAPTURE".format(pieceType+colour, (i,j)))
+                        return True
+                    
+        return False
+
+    # Returns True if a move is legal, False otherwise
+    def isLegalMove(self, piece, fromPos, toPos):
+        
+        colour = getColour(piece)
+        pieceBoard = self.getBoard(piece)
+        if pieceBoard[fromPos] == 1:
+
+            bits = 0b0
+            if self.canCapture(colour):
+                checkBits = self.getCaptures(piece, fromPos)
+                print("CAN CAPTURE")
+            else: 
+                checkBits = self.getMoves(piece,fromPos)
+                print("CANNOT CAPTURE")
+                
+            index = coordsToIndex(toPos)
+            if (checkBits >> index) & 0b1 == 1:
+                return True
+
+        return False
+
+    def getLegalMoveList(self, colour, pieces=pieceArray):
+        
+        canCap          = self.canCapture(colour)
+        legalMoveList   = []
+        colourBoard     = self.getAll(colour)
+        
+        for i in range(0,8):
+            for j in range(0,8):
+                
+                # If no piece of specified colour is there, skip
+                if colourBoard[i,j] != 1:
+                    continue
+                    
+                for pieceType in pieces:
+                    piece = pieceType + colour
+                    
+                    # Continue until correct piece is found
+                    if self.getBoard(piece)[i,j] != 1:
+                        continue
+                    
+                    
+                    if canCap:
+                        legalMoveBits   = self.getCaptures(piece, (i,j))
+                        legalMoveList   += bitsToMoveList(piece, (i,j), legalMoveBits)
+                    else:
+                        legalMoveBits   = self.getMoves(piece, (i,j))
+                        legalMoveList   += bitsToMoveList(piece, (i,j), legalMoveBits)
+        
+        return legalMoveList
+    
     # Gets moves for sliding pieces (Queen, Rook, Bishop)
     def getSlidingMoves(self, piece, coords):
         
@@ -267,16 +395,11 @@ class Gamestate():
         
         return final
     
-    # Promotes a pawn in position pos to a piece of type pieceType
-    def promotePiece(self, colour, pieceType, pos):
-        pawnBoard       = self.getBoard(colour + PAWN)
-        promoteBoard    = self.getBoard(colour + pieceType)
         
-        pawnBoard[pos]      = 0
-        promoteBoard[pos]   = 1
+    #Moves piece from fromPos to toPos, and updates the boards and turn player.
+    def makeMove(self, move, returnString=False):
         
-    #Moves piece from fromPos to toPos, and updates the ALL boards.
-    def movePiece(self, piece, fromPos, toPos, capture=True, returnString=False):
+        piece, fromPos, toPos = move.unpack()
         
         colour = getColour(piece)
         
@@ -288,20 +411,30 @@ class Gamestate():
         if self.getAll(colour) == 1:
             raise Exception("There is already a piece of colour {} at position {}".format(bin(colour), toPos))
             
-        if capture == True:
-            
-            oppColour = invColour(colour)
-            # This could be handled more efficiently by specifying the capture board. Will rethink later
-            for oppPieceType in pieceArray:
-                oppBoard = self.getBoard(oppPieceType | oppColour)
-                if oppBoard[toPos] == 1:
-                    self[oppPieceType + oppColour, toPos[0], toPos[1]] = 0
+
+        # Code for capturing pieces 
+        # This could be handled more efficiently by specifying the capture board. Will rethink later
+        oppColour = invColour(colour)
+        for oppPieceType in pieceArray:
+            oppBoard = self.getBoard(oppPieceType | oppColour)
+            if oppBoard[toPos] == 1:
+                self[oppPieceType + oppColour, toPos[0], toPos[1]] = 0
                     
         self[piece, fromPos[0], fromPos[1]] = 0
         self[piece, toPos[0], toPos[1]]   = 1
+        
+        self.changeTurnPlayer()
                     
         if returnString == True:
             return pieceToLetter[piece] + coordsToAlg(fromPos) + "x" * int(capture) + coordsToAlg(toPos)
+        
+    # Promotes a pawn in position pos to a piece of type pieceType
+    def promotePiece(self, colour, pieceType, pos):
+        pawnBoard       = self.getBoard(colour + PAWN)
+        promoteBoard    = self.getBoard(colour + pieceType)
+        
+        pawnBoard[pos]      = 0
+        promoteBoard[pos]   = 1
         
     #returns the piece in position pos
     def getPiece(self, pos):
@@ -313,19 +446,6 @@ class Gamestate():
                     return pieceType + colour
 
         return NONE
-
-    # Returns True if a move is legal, False otherwise
-    def isLegalMove(self, piece, fromPos, toPos):
-        pieceBoard = self.getBoard(piece)
-        if pieceBoard[fromPos] == 1:
-
-            
-            moveBits = self.getMoves(piece, fromPos)
-            index = coordsToIndex(toPos)
-            if (moveBits >> index) & 0b1 == 1:
-                return True
-
-        return False
 
     # args: piece, xPos, yPos
     # sets the value at (xPos, yPos) on piece's Bitboard to val
@@ -393,6 +513,26 @@ def indexToCoords(index):
 
     return (col, row)
 
+def bitsToMoveList(piece, fromPos, bits):
+    moveList = []
+    
+    for index in range(0,64):
+        bit = (bits >> index) & 0b1
+        if bit == 1:
+            toPos = indexToCoords(index)
+            newMove = Move(piece, fromPos, toPos)
+            moveList.append(newMove)
+            
+    return moveList
+
+def pieceToLetter(piece):
+    
+    pieceToLetterMap    = {PAWN: "", QUEEN: "Q", ROOK: "R", KING: "K", KNIGHT: "N", BISHOP: "B", NONE: ""}
+    pieceType           = getPieceType(piece)
+    
+    return pieceToLetterMap[pieceType]
+    
+
 # test = Bitboard(WHITE + PAWN)
 # test.default()
 
@@ -425,4 +565,3 @@ def indexToCoords(index):
 
 # print(coordsToAlg((3,7)))
 # print(test)
-
